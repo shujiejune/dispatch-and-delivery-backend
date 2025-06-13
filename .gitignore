@@ -1,0 +1,30 @@
+# Test binary, build output
+*.test
+*.out
+
+# Output of go build
+/cmd/api/api
+/cmd/api/main
+
+# Go workspace file (Go 1.18+)
+go.work
+go.work.sum
+
+# IDE/editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docker
+*.env
+.env.*
+docker-compose.yml
+docker-compose.override.yml
