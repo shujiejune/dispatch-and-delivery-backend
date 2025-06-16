@@ -63,3 +63,24 @@ func JWTMAuth(jwtSecretKey string) echo.MiddlewareFunc {
 	}
 	return echojwt.WithConfig(config)
 }
+
+// AdminRequired checks if the authenticated user has the "ADMIN" role.
+// Run after JWTMAuth, because it depends on the claims fetched from the context.
+func AdminRequired() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// The JWTMAuth middleware's SuccessHandler should have placed it here.
+			role, ok := c.Get("userRole").(string)
+			if !ok {
+				c.Logger().Error("Could not retrieve user role from context.")
+				return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: "Could not process user role"})
+			}
+
+			if role != "ADMIN" {
+				return c.JSON(http.StatusForbidden, models.ErrorResponse{Message: "Forbidden: Access is restricted to administrators"})
+			}
+
+			return next(c)
+		}
+	}
+}
