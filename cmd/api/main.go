@@ -11,6 +11,7 @@ import (
 
 	"dispatch-and-delivery/internal/api"
 	"dispatch-and-delivery/internal/config"
+	"dispatch-and-delivery/internal/modules/admin"
 	"dispatch-and-delivery/internal/modules/logistics"
 	"dispatch-and-delivery/internal/modules/orders"
 	"dispatch-and-delivery/internal/modules/users"
@@ -65,12 +66,29 @@ func main() {
 	userRepo := users.NewRepository(dbPool)
 	userService := users.NewService(userRepo, cfg.JWTSecret)
 	userHandler := users.NewHandler(userService)
+
+	// --- Orders Module ---
+	orderRepo := orders.NewRepository(dbPool)
+	orderService := orders.NewService(orderRepo, cfg.JWTSecret)
 	orderHandler := orders.NewHandler(orderService)
+
+	// --- Logistics Module ---
+	logisticsRepo := logistics.NewRepository(dbPool)
+	logisticsService := logistics.NewService(logisticsRepo, orderService, cfg.JWTSecret)
+	logisticsHandler := logistics.NewHandler(logisticsService)
+
+	// --- Admin Module ---
+	adminRepo := admin.NewRepository(dbPool)
+	adminService := admin.NewService(adminRepo, orderRepo, logisticsRepo)
+	adminHandler := admin.NewHandler(adminService)
 
 	// 4. --- Initialize Router ---
 	// Add more routes
 	api.SetupRoutes(e, cfg.JWTSecret,
 		userHandler,
+		orderHandler,
+		logisticsHandler,
+		adminHandler,
 	)
 
 	// 5. --- Start Server with graceful shutdown logic ---
