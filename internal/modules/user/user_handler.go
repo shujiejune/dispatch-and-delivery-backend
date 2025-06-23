@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
@@ -72,33 +73,60 @@ func (h *Handler) Login(c echo.Context) error {
 func (h *Handler) GoogleLogin(c echo.Context) error {
 	// The service generates the unique URL for this login attempt.
 	// This URL includes the client ID and a state parameter for security.
-	authURL, err := h.service.HandleGoogleLogin()
+	authURL, state, err := h.service.HandleGoogleLogin()
 	if err != nil {
 		c.Logger().Error("Handler.GoogleLogin: failed to generate auth URL: ", err)
 		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: "Could not initiate Google login"})
 	}
 
+	// Create a new secure cookie to store the state parameter
+	cookie := new(http.Cookie)
+	cookie.Name = "oauthstate" // Name of the cookie
+	cookie.Value = state
+	cookie.Expires = time.Now().Add(10 * time.Minute) // Cookie is valid for 10 minutes
+	cookie.Path = "/"
+	cookie.HttpOnly = true // Prevents JavaScript from accessing the cookie
+	cookie.Secure = true   // Only send over HTTPS (set to false in config for localhost HTTP dev)
+	cookie.SameSite = http.SameSiteLaxMode
+	c.SetCookie(cookie)
+
 	// Redirect the user's browser to the Google authentication page.
 	return c.Redirect(http.StatusTemporaryRedirect, authURL)
 }
 
-// GoogleCallback handles the callback request from Google after the user has authenticated.
+// GoogleCallback handles the callback request from Google after the user has authenticated,
+//
+//	and validates the state parameter from the URL against the one stored in the cookie.
+//
 // Google redirects the user here with a `code` and `state` parameter in the URL.
 func (h *Handler) GoogleCallback(c echo.Context) error {
-	// For a production app, you must validate the `state` parameter here against a value
-	// stored in the user's session/cookie to prevent CSRF attacks. We'll omit for simplicity.
-	if c.QueryParam("state") != storedState {
-		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{Message: "Invalid state"})
+	// 1. Read the state from the cookie set in the login step.
+	oauthStateCookie, err := c.Cookie("oauthstate")
+	if err != nil {
+		// If the cookie expired or was never set
+		c.Logger().Error("Handler.GoogleCallback: could not read state cookie: ", err)
+		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{Message: "Invalid or missing state cookie"})
 	}
 
-	// Get the authorization code from the query parameters.
+	// 2. Compare the state from the cookie with the state from the query parameter.
+	if c.QueryParam("state") != oauthStateCookie.Value {
+		c.Logger().Error("Handler.GoogleCallback: state parameter mismatch")
+		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{Message: "Invalid state parameter"})
+	}
+
+	// Optional: Delete the cookie after it has been used once.
+	oauthStateCookie.Value = ""
+	oauthStateCookie.Expires = time.Unix(0, 0)
+	c.SetCookie(oauthStateCookie)
+
+	// 3. Get the authorization code from the query parameters.
 	code := c.QueryParam("code")
 	if code == "" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: "Authorization code not provided"})
 	}
 
-	// Call the service to exchange the code for a token, fetch user info,
-	// find or create the user, and generate our application's JWT.
+	// 4. Call the service to exchange the code for a token, fetch user info,
+	// find or create the user, and generate the application's JWT.
 	authResponse, err := h.service.HandleGoogleCallback(c.Request().Context(), code)
 	if err != nil {
 		c.Logger().Error("Handler.GoogleCallback: service error: ", err)
@@ -106,9 +134,7 @@ func (h *Handler) GoogleCallback(c echo.Context) error {
 		return c.Redirect(http.StatusTemporaryRedirect, fmt.Sprintf("%s/login/error", h.service.GetClientOrigin()))
 	}
 
-	// On success, we need to get the JWT to the frontend.
-	// A common way is to redirect the user back to a specific frontend page
-	// and include the token as a query parameter.
+	// 5. Redirect the user back to a specific frontend page with the token.
 	// The frontend page can then parse the token from the URL and save it.
 	redirectURL := fmt.Sprintf("%s/login/success?token=%s", h.service.GetClientOrigin(), authResponse.AccessToken)
 	return c.Redirect(http.StatusTemporaryRedirect, redirectURL)

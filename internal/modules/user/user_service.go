@@ -28,7 +28,7 @@ type ServiceInterface interface {
 	ResendActivationEmail(ctx context.Context, email string) error
 	RequestPasswordReset(ctx context.Context, email string) error
 	ResetPassword(ctx context.Context, token string, newPassword string) (*models.AuthResponse, error)
-	HandleGoogleLogin() (string, error)
+	HandleGoogleLogin() (string, string, error)
 	HandleGoogleCallback(ctx context.Context, code string) (*models.AuthResponse, error)
 
 	GetUserProfile(ctx context.Context, userID string) (*models.User, error)
@@ -36,13 +36,10 @@ type ServiceInterface interface {
 }
 
 type Service struct {
-	userRepo RepositoryInterface
-	// For simplicity, userNote specific methods are on RepositoryInterface for now.
-	// In a larger system, userNoteRepo might be a separate RepositoryInterface.
+	userRepo          RepositoryInterface
 	emailSvc          email.ServiceInterface // For sending emails
 	jwtSecret         string
 	clientOrigin      string // For sending activation and password reset emails (domain name)
-	adminEmail        string
 	googleOAuthConfig *oauth2.Config
 }
 
@@ -51,7 +48,6 @@ func NewService(
 	emailSvc email.ServiceInterface,
 	JWTSecretFromConfig string,
 	clientOriginFromConfig string,
-	adminEmailFromConfig string,
 	googleOAuthConfig *oauth2.Config,
 ) ServiceInterface {
 	return &Service{
@@ -59,7 +55,6 @@ func NewService(
 		emailSvc:          emailSvc,
 		jwtSecret:         JWTSecretFromConfig,
 		clientOrigin:      clientOriginFromConfig,
-		adminEmail:        adminEmailFromConfig,
 		googleOAuthConfig: googleOAuthConfig,
 	}
 }
@@ -73,7 +68,7 @@ type GoogleUserInfo struct {
 	Picture       string `json:"picture"`
 }
 
-// Allows other packages (like the handler) to know the frontend URL for redirects.
+// Allows other packages (e.g., the handler) to know the frontend URL for redirects.
 func (s *Service) GetClientOrigin() string {
 	return s.clientOrigin
 }
@@ -198,7 +193,7 @@ func (s *Service) ResendActivationEmail(ctx context.Context, email string) error
 	// 2. Check if user is already active
 	if user.IsActive {
 		log.Printf("INFO: Activation resend requested for already active user: %s", email)
-		return nil // Do nothing, don't signal that they are active.
+		return nil
 	}
 
 	// 3. Generate a new activation token
@@ -283,21 +278,16 @@ func (s *Service) ResetPassword(ctx context.Context, token string, newPassword s
 	return s.generateAuthResponse(user)
 }
 
-// HandleGoogleLogin generates the redirect URL for the user.
-func (s *Service) HandleGoogleLogin() (string, error) {
-	// Generates the URL the user should be redirected to.
-	// The state parameter is crucial for CSRF protection.
-	// It should be a random, non-guessable string.
-	// In a production app, you'd generate this, store it in a short-lived, secure,
-	// HttpOnly cookie, and then compare it in the callback handler.
+// HandleGoogleLogin generates and returns the redirect URL and the state value for the user.
+func (s *Service) HandleGoogleLogin() (string, string, error) {
 	state, err := utils.GenerateSecureToken(16)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate state for google login: %w", err)
+		return "", "", fmt.Errorf("failed to generate state for google login: %w", err)
 	}
 	// This generates a URL like:
 	// https://accounts.google.com/o/oauth2/v2/auth?client_id=...&redirect_uri=...&response_type=code&scope=...&state=...
 	url := s.googleOAuthConfig.AuthCodeURL(state)
-	return url, nil
+	return url, state, nil
 }
 
 // HandleGoogleCallback processes the callback from Google, completing the login/signup.
@@ -350,9 +340,6 @@ func (s *Service) HandleGoogleCallback(ctx context.Context, code string) (*model
 			return nil, err
 		}
 	}
-	// If the user was found, you might want to check if their AuthProvider is "email"
-	// and potentially link the Google account by setting AuthProvider and AuthProviderID.
-	// For now, we'll just log them in.
 
 	// 4. Issue JWT for this user.
 	return s.generateAuthResponse(user)
