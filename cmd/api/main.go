@@ -13,8 +13,8 @@ import (
 	"dispatch-and-delivery/internal/config"
 	"dispatch-and-delivery/internal/modules/admin"
 	"dispatch-and-delivery/internal/modules/logistics"
-	"dispatch-and-delivery/internal/modules/orders"
-	"dispatch-and-delivery/internal/modules/users"
+	"dispatch-and-delivery/internal/modules/order"
+	"dispatch-and-delivery/internal/modules/user"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -63,14 +63,14 @@ func main() {
 
 	// 3. --- Dependency Injection (Wiring everything up) ---
 	// --- Users Module ---
-	userRepo := users.NewRepository(dbPool)
-	userService := users.NewService(userRepo, cfg.JWTSecret)
-	userHandler := users.NewHandler(userService)
+	userRepo := user.NewRepository(dbPool)
+	userService := user.NewService(userRepo, cfg.JWTSecret)
+	userHandler := user.NewHandler(userService)
 
 	// --- Orders Module ---
-	orderRepo := orders.NewRepository(dbPool)
-	orderService := orders.NewService(orderRepo, cfg.JWTSecret)
-	orderHandler := orders.NewHandler(orderService)
+	orderRepo := order.NewRepository(dbPool)
+	orderService := order.NewService(orderRepo, cfg.JWTSecret)
+	orderHandler := order.NewHandler(orderService)
 
 	// --- Logistics Module ---
 	logisticsRepo := logistics.NewRepository(dbPool)

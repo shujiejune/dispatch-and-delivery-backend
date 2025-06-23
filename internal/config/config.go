@@ -6,10 +6,14 @@ import (
 )
 
 type Config struct {
-	ServerPort   string `mapstructure:"SERVER_PORT"`
-	DatabaseURL  string `mapstructure:"DATABASE_URL"`
-	JWTSecret    string `mapstructure:"JWT_SECRET"`
-	ClientOrigin string `mapstructure:"CLIENT_ORIGIN"`
+	ServerPort              string `mapstructure:"SERVER_PORT"`
+	DatabaseURL             string `mapstructure:"DATABASE_URL"`
+	JWTSecret               string `mapstructure:"JWT_SECRET"`
+	ClientOrigin            string `mapstructure:"CLIENT_ORIGIN"`
+	AdminEmail              string `mapstructure:"ADMIN_EMAIL"`
+	GoogleOAuthClientID     string `mapstructure:"GOOGLE_OAUTH_CLIENT_ID"`
+	GoogleOAuthClientSecret string `mapstructure:"GOOGLE_OAUTH_CLIENT_SECRET"`
+	GoogleOAuthRedirectURL  string `mapstructure:"GOOGLE_OAUTH_REDIRECT_URL"`
 	// Add other configurations as needed
 }
 
