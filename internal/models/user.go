@@ -1,35 +1,19 @@
 package models
 
-import "time" // if you have CreatedAt, UpdatedAt
-
-// Role constants for user roles
-const (
-	RoleAdmin      = "admin"
-	RoleNormalUser = "normal_user"
-	RoleGuest      = "guest" // Though guest is usually implied by lack of auth
-)
-
-type ProfileData struct {
-	HeatmapData  map[string]int `json:"heatmap_data,omitempty"`
-	BadgeIDs     []int          `json:"badge_ids,omitempty"`
-	OtherContact string         `json:"other_contact,omitempty"`
-}
+import "time"
 
 // User struct (you'll have more fields from your DB schema)
 type User struct {
-	ID             string       `json:"id" db:"id"` // UUID string from DB
-	Nickname       string       `json:"nickname,omitempty" db:"nickname"`
-	Email          string       `json:"email" db:"email"`
-	PasswordHash   string       `json:"-" db:"password_hash"`
-	Role           string       `json:"role" db:"role"`
-	AvatarURL      string       `json:"avatar_url,omitempty" db:"avatar_url"`
-	ProfileData    *ProfileData `json:"profile_data,omitempty" db:"profile_data"`
-	AuthProvider   string       `json:"auth_provider" db:"auth_provider"`
-	AuthProviderID string       `json:"-" db:"auth_provider_id"`
-	IsActive       bool         `json:"is_active" db:"is_active"`
-	CreatedAt      time.Time    `json:"created_at" db:"created_at"`
-	UpdatedAt      time.Time    `json:"updated_at" db:"updated_at"`
-	// Add other fields as per your DB schema
+	ID             string    `json:"id" db:"id"` // UUID string from DB
+	Nickname       string    `json:"nickname,omitempty" db:"nickname"`
+	Email          string    `json:"email" db:"email"`
+	PasswordHash   string    `json:"-" db:"password_hash"`
+	AvatarURL      string    `json:"avatar_url,omitempty" db:"avatar_url"`
+	AuthProvider   string    `json:"auth_provider" db:"auth_provider"`
+	AuthProviderID string    `json:"-" db:"auth_provider_id"`
+	IsActive       bool      `json:"is_active" db:"is_active"`
+	CreatedAt      time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type SignupRequest struct {
@@ -54,10 +38,8 @@ type AuthResponse struct {
 
 // UserUpdateData defines fields that can be updated for a user profile
 type UserUpdateData struct {
-	Nickname     *string `json:"nickname,omitempty" validate:"omitempty,min=1,max=100"`
-	AvatarURL    *string `json:"avatar_url,omitempty" validate:"omitempty,url"`
-	OtherContact *string `json:"other_contact,omitempty" validate:"omitempty,max=255"`
-	// Add other updatable fields like contacts from profile_data if needed
+	Nickname  *string `json:"nickname,omitempty" validate:"omitempty,min=1,max=100"`
+	AvatarURL *string `json:"avatar_url,omitempty" validate:"omitempty,url"`
 }
 
 // UserWithPasswordHash is used internally when password hash is needed
