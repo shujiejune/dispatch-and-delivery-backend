@@ -6,8 +6,8 @@ import (
 	"dispatch-and-delivery/internal/api/middleware"
 	"dispatch-and-delivery/internal/modules/admin"
 	"dispatch-and-delivery/internal/modules/logistics"
-	"dispatch-and-delivery/internal/modules/orders"
-	"dispatch-and-delivery/internal/modules/users"
+	"dispatch-and-delivery/internal/modules/order"
+	"dispatch-and-delivery/internal/modules/user"
 
 	"github.com/labstack/echo/v4"
 )
@@ -15,14 +15,14 @@ import (
 // SetupRoutes sets up all the API endpoints for the application.
 func SetupRoutes(
 	e *echo.Echo,
-	userHandler *users.Handler,
-	orderHandler *orders.Handler,
+	jwtSecretKey string,
+	userHandler *user.Handler,
+	orderHandler *order.Handler,
 	logisticsHandler *logistics.Handler,
 	adminHandler *admin.Handler,
-	jwtSecret string,
 ) {
 	// Initialize the JWT authentication middleware
-	authMiddleware := middleware.JWTMAuth(jwtSecret)
+	authMiddleware := middleware.JWTMAuth(jwtSecretKey)
 	// Initialize an Admin role authorization middleware
 	adminRequired := middleware.AdminRequired()
 
@@ -35,7 +35,12 @@ func SetupRoutes(
 	{
 		authGroup.POST("/signup", userHandler.Signup)
 		authGroup.POST("/login", userHandler.Login)
-		// Logout and ResetPassword
+		authGroup.POST("/activate", userHandler.ActivateAccount)
+		authGroup.POST("resend-activation", userHandler.ResendActivation)
+		authGroup.POST("request-password-reset", userHandler.RequestPasswordReset)
+		authGroup.POST("reset-password", userHandler.ResetPassword)
+		authGroup.GET("/google/login", userHandler.GoogleLogin)
+		authGroup.GET("/google/callback", userHandler.GoogleCallback)
 	}
 
 	// --- User (Customer) Routes ---
@@ -43,9 +48,9 @@ func SetupRoutes(
 	{
 
 		// User Profile & Addresses
-		profileGroup.GET("", userHandler.GetMyProfile)
-		profileGroup.PUT("", userHandler.UpdateMyProfile)
-		profileGroup.GET("/addresses", userHandler.ListMyAddresses)
+		profileGroup.GET("", userHandler.GetProfile)
+		profileGroup.PUT("", userHandler.UpdateProfile)
+		profileGroup.GET("/addresses", userHandler.ListAddresses)
 		profileGroup.POST("/addresses", userHandler.AddAddress)
 		profileGroup.PUT("/addresses/:addressId", userHandler.UpdateAddress)
 		profileGroup.DELETE("/addresses/:addressId", userHandler.DeleteAddress)
