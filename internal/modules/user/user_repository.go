@@ -77,7 +77,7 @@ func (r *Repository) WithTx(tx pgx.Tx) *Repository {
 func (r *Repository) FindByID(ctx context.Context, userID string) (*models.User, error) {
 	user := &models.User{}
 	query := `SELECT id, nickname, email, avatar_url, auth_provider, is_active, created_at, updated_at FROM users WHERE id = $1`
-	err := r.db.QueryRow(ctx, query, userID).Scan(
+	err := r.executor.QueryRow(ctx, query, userID).Scan(
 		&user.ID, &user.Nickname, &user.Email, &user.AvatarURL, &user.AuthProvider, &user.IsActive, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err != nil {
@@ -94,7 +94,7 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*models.Use
 	// Important for checking if email exists during signup if you implement it
 	user := &models.User{}
 	query := `SELECT id, nickname, email, password_hash, avatar_url, auth_provider, is_active, created_at, updated_at FROM users WHERE email = $1`
-	err := r.db.QueryRow(ctx, query, email).Scan(
+	err := r.executor.QueryRow(ctx, query, email).Scan(
 		&user.ID, &user.Nickname, &user.Email, &user.PasswordHash, &user.AvatarURL, &user.AuthProvider, &user.IsActive, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err != nil {
@@ -109,7 +109,7 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*models.Use
 func (r *Repository) FindByNickname(ctx context.Context, nickname string) (*models.User, error) {
 	user := &models.User{}
 	query := `SELECT id, nickname, email, avatar_url, auth_provider, is_active, created_at, updated_at FROM users WHERE nickname = $1`
-	err := r.db.QueryRow(ctx, query, nickname).Scan(
+	err := r.executor.QueryRow(ctx, query, nickname).Scan(
 		&user.ID, &user.Nickname, &user.Email, &user.AvatarURL, &user.AuthProvider, &user.IsActive, &user.CreatedAt, &user.UpdatedAt,
 	)
 	if err != nil {
@@ -130,7 +130,7 @@ func (r *Repository) FindByPasswordResetToken(ctx context.Context, token string)
 	WHERE password_reset_token = $1 AND password_reset_expires_at > NOW()
 	`
 
-	err := r.db.QueryRow(ctx, query, token).Scan(
+	err := r.executor.QueryRow(ctx, query, token).Scan(
 		&user.ID, &user.Nickname, &user.Email, &user.AvatarURL, &user.CreatedAt, &user.UpdatedAt, &user.IsActive,
 	)
 	if err != nil {
@@ -148,7 +148,7 @@ func (r *Repository) SetPasswordResetToken(ctx context.Context, userID string, t
 	SET password_reset_token = $1, password_reset_expires_at = $2, updated_at = NOW()
 	WHERE id = $3
 	`
-	cmdTag, err := r.db.Exec(ctx, query, token, expiresAt, userID)
+	cmdTag, err := r.executor.Exec(ctx, query, token, expiresAt, userID)
 	if err != nil {
 		return fmt.Errorf("repository.SetPasswordResetToken: %w", err)
 	}
@@ -165,7 +165,7 @@ func (r *Repository) UpdatePasswordAndClearResetToken(ctx context.Context, userI
 	SET password_hash = $1, password_reset_token = $2, updated_at = NOW()
 	WHERE id = $3
 	`
-	cmdTag, err := r.db.Exec(ctx, query, passwordHash, "", userID)
+	cmdTag, err := r.executor.Exec(ctx, query, passwordHash, "", userID)
 	if err != nil {
 		return fmt.Errorf("repository.UpdatePasswordAndClearResetToken: %w", err)
 	}
@@ -182,7 +182,7 @@ func (r *Repository) UpdateActivationToken(ctx context.Context, userID, newToken
 	SET activation_token = $1, activation_token_expires_at = $2, updated_at = NOW()
 	WHERE id = $3
 	`
-	cmdTag, err := r.db.Exec(ctx, query, newToken, expiresAt, userID)
+	cmdTag, err := r.executor.Exec(ctx, query, newToken, expiresAt, userID)
 	if err != nil {
 		return fmt.Errorf("repository.UpdateActivationToken: %w", err)
 	}
@@ -199,7 +199,7 @@ func (r *Repository) CreateInactiveUser(ctx context.Context, user *models.User, 
         INSERT INTO users (nickname, email, password_hash, activation_token, activation_token_expires_at, auth_provider)
         VALUES ($1, $2, $3, $4, $5, $6, 'email')
         RETURNING id, created_at, updated_at`
-	err := r.db.QueryRow(ctx, query,
+	err := r.executor.QueryRow(ctx, query,
 		user.Nickname, user.Email, passwordHash, activationToken, expiresAt,
 	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
@@ -216,7 +216,7 @@ func (r *Repository) ActivateUser(ctx context.Context, token string) (*models.Us
         SET is_active = TRUE, activation_token = NULL, activation_token_expires_at = NULL, updated_at = NOW()
         WHERE activation_token = $1 AND activation_token_expires_at > NOW() AND is_active = FALSE
         RETURNING id, nickname, email, avatar_url, auth_provider, is_active, created_at, updated_at`
-	err := r.db.QueryRow(ctx, query, token).Scan(&user.ID, &user.Nickname, &user.Email, &user.AvatarURL, &user.AuthProvider, &user.CreatedAt, &user.UpdatedAt)
+	err := r.executor.QueryRow(ctx, query, token).Scan(&user.ID, &user.Nickname, &user.Email, &user.AvatarURL, &user.AuthProvider, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, models.ErrInvalidToken
@@ -232,7 +232,7 @@ func (r *Repository) CreateOAuthUser(ctx context.Context, user *models.User) (*m
         INSERT INTO users (nickname, email, auth_provider, auth_provider_id, is_active)
         VALUES ($1, $2, $3, $4, $5, TRUE)
         RETURNING id, created_at, updated_at`
-	err := r.db.QueryRow(ctx, query,
+	err := r.executor.QueryRow(ctx, query,
 		user.Nickname, user.Email, user.AuthProvider, user.AuthProviderID,
 	).Scan(&user.ID, &user.CreatedAt, &user.UpdatedAt)
 
@@ -275,7 +275,7 @@ func (r *Repository) Update(ctx context.Context, userID string, data models.User
 		strings.Join(setClauses, ", "), argIdx)
 
 	updatedUser := &models.User{}
-	err := r.db.QueryRow(ctx, query, args...).Scan(
+	err := r.executor.QueryRow(ctx, query, args...).Scan(
 		&updatedUser.ID, &updatedUser.Nickname, &updatedUser.Email, &updatedUser.PasswordHash, &updatedUser.AvatarURL, &updatedUser.AuthProvider, &updatedUser.AuthProviderID, &updatedUser.IsActive, &updatedUser.CreatedAt, &updatedUser.UpdatedAt,
 	)
 	if err != nil {
