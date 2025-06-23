@@ -2,14 +2,14 @@ package user
 
 import (
 	"context"
+	"dispatch-and-delivery/internal/models"
+	"dispatch-and-delivery/internal/modules/forum" // For publishing notes
+	"dispatch-and-delivery/pkg/email"
+	"dispatch-and-delivery/pkg/utils"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"jingdezhen-ceramics-backend/internal/models"
-	"jingdezhen-ceramics-backend/internal/modules/forum" // For publishing notes
-	"jingdezhen-ceramics-backend/pkg/email"
-	"jingdezhen-ceramics-backend/pkg/utils"
 	"log"
 	"net/http"
 	"time"
@@ -17,7 +17,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
 
 // ServiceInterface defines methods for user business logic.
