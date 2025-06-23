@@ -10,11 +10,15 @@ type Config struct {
 	DatabaseURL             string `mapstructure:"DATABASE_URL"`
 	JWTSecret               string `mapstructure:"JWT_SECRET"`
 	ClientOrigin            string `mapstructure:"CLIENT_ORIGIN"`
-	AdminEmail              string `mapstructure:"ADMIN_EMAIL"`
 	GoogleOAuthClientID     string `mapstructure:"GOOGLE_OAUTH_CLIENT_ID"`
 	GoogleOAuthClientSecret string `mapstructure:"GOOGLE_OAUTH_CLIENT_SECRET"`
 	GoogleOAuthRedirectURL  string `mapstructure:"GOOGLE_OAUTH_REDIRECT_URL"`
-	// Add other configurations as needed
+	// SMTP fields for sending emails
+	SMTPServer       string
+	SMTPPort         string
+	SMTPUser         string
+	SMTPPassword     string
+	EmailFromAddress string
 }
 
 func LoadConfig(path string) (config Config, err error) {

@@ -9,11 +9,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // RepositoryInterface defines methods for interacting with user storage.
 type RepositoryInterface interface {
+	BeginTx(ctx context.Context) (pgx.Tx, error)
+	WithTx(tx pgx.Tx) *Repository
+
 	FindByID(ctx context.Context, userID string) (*models.User, error)
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
 	FindByNickname(ctx context.Context, nickname string) (*models.User, error)
@@ -27,14 +31,47 @@ type RepositoryInterface interface {
 	ActivateUser(ctx context.Context, token string) (*models.User, error)
 	CreateOAuthUser(ctx context.Context, user *models.User) (*models.User, error) // Assuming you might add direct user creation
 	Update(ctx context.Context, userID string, updateData models.UserUpdateData) (*models.User, error)
+
+	ClearDefaultAddress(ctx context.Context, userID string) error
+	VerifyAddressOwner(ctx context.Context, userID, addressID string) error
+	ListAddresses(ctx context.Context, userID string) ([]models.Address, error)
+	AddAddress(ctx context.Context, userID, label, streetAddress string, isDefault bool) (*models.Address, error)
+	UpdateAddress(ctx context.Context, addressID string, req models.UpdateAddressRequest) (*models.Address, error)
+	DeleteAddress(ctx context.Context, userID, addressID string) error
+}
+
+// This interface represents anything that can execute a SQL query,
+// which includes both a connection pool and a transaction.
+type DBExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 type Repository struct {
-	db *pgxpool.Pool
+	db       *pgxpool.Pool
+	executor DBExecutor
 }
 
 func NewRepository(db *pgxpool.Pool) RepositoryInterface {
-	return &Repository{db: db}
+	return &Repository{
+		db:       db,
+		executor: db,
+	}
+}
+
+// BeginTx starts a new database transaction.
+func (r *Repository) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.db.Begin(ctx)
+}
+
+// WithTx returns a new instance of the Repository that is "scoped" to the provided transaction.
+// All database operations on the returned repository will be part of this single transaction.
+func (r *Repository) WithTx(tx pgx.Tx) *Repository {
+	return &Repository{
+		db:       r.db,
+		executor: tx, // The executor is now the transaction, not the pool
+	}
 }
 
 func (r *Repository) FindByID(ctx context.Context, userID string) (*models.User, error) {
@@ -245,4 +282,135 @@ func (r *Repository) Update(ctx context.Context, userID string, data models.User
 		return nil, fmt.Errorf("repository.UpdateUser: %w", err)
 	}
 	return updatedUser, nil
+}
+
+// ClearDefaultAddress sets is_default to false for all of a user's addresses.
+func (r *Repository) ClearDefaultAddress(ctx context.Context, userID string) error {
+	query := `UPDATE addresses SET is_default = false WHERE user_id = $1 AND is_default = true;`
+
+	_, err := r.executor.Exec(ctx, query, userID)
+	return err
+}
+
+// VerifyAddressOwner checks if a given addressID belongs to the userID.
+func (r *Repository) VerifyAddressOwner(ctx context.Context, userID, addressID string) error {
+	var exists bool
+	query := `SELECT EXISTS(SELECT 1 FROM addresses WHERE id = $1 AND user_id = $2);`
+	err := r.executor.QueryRow(ctx, query, addressID, userID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		// Use a standard error type for "not found"
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func (r *Repository) ListAddresses(ctx context.Context, userID string) ([]models.Address, error) {
+	var addresses []models.Address
+
+	query := `
+	SELECT id, user_id, label, street_address, is_default, created_at, updated_at 
+	FROM addresses
+	WHERE user_id = $1
+	`
+	rows, err := r.executor.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("repository.ListAddresses: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var addr models.Address
+		if err := rows.Scan(&addr.ID, &addr.UserID, &addr.Label, &addr.StreetAddress, &addr.IsDefault, &addr.CreatedAt, &addr.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("repository.ListAddresses.Scan: %w", err)
+		}
+		addresses = append(addresses, addr)
+	}
+
+	return addresses, nil
+}
+
+// AddAddress creates a new address record. It will run within a transaction if the repository was created using WithTx().
+func (r *Repository) AddAddress(ctx context.Context, userID, label, streetAddress string, isDefault bool) (*models.Address, error) {
+	query := `
+        INSERT INTO addresses (user_id, label, street_address, is_default)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, user_id, label, street_address, is_default, created_at, updated_at;
+	`
+	var addr models.Address
+	row := r.executor.QueryRow(ctx, query, userID, label, streetAddress, isDefault)
+	err := row.Scan(&addr.ID, &addr.UserID, &addr.Label, &addr.StreetAddress, &addr.IsDefault, &addr.CreatedAt, &addr.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &addr, nil
+}
+
+func (r *Repository) UpdateAddress(ctx context.Context, addressID string, req models.UpdateAddressRequest) (*models.Address, error) {
+	var setClauses []string
+	var args []interface{}
+	argCount := 1
+
+	// Dynamically build the SET part of the query based on which fields are provided.
+	if req.Label != "" {
+		setClauses = append(setClauses, fmt.Sprintf("label = $%d", argCount))
+		args = append(args, req.Label)
+		argCount++
+	}
+	if req.StreetAddress != "" {
+		setClauses = append(setClauses, fmt.Sprintf("street_address = $%d", argCount))
+		args = append(args, req.StreetAddress)
+		argCount++
+	}
+	if req.IsDefault != nil { // Check the pointer, not the value
+		setClauses = append(setClauses, fmt.Sprintf("is_default = $%d", argCount))
+		args = append(args, *req.IsDefault)
+		argCount++
+	}
+
+	// If no fields were provided to update, we can return early.
+	if len(setClauses) == 0 {
+		return nil, fmt.Errorf("no fields to update")
+	}
+
+	// Always update the updated_at timestamp
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argCount))
+	args = append(args, "now()")
+	argCount++
+
+	args = append(args, addressID)
+
+	query := fmt.Sprintf(`
+        UPDATE addresses
+        SET %s
+        WHERE id = $%d
+        RETURNING id, user_id, label, street_address, is_default, created_at, updated_at;
+	`, strings.Join(setClauses, ", "), argCount)
+
+	var addr models.Address
+	row := r.executor.QueryRow(ctx, query, args...)
+	err := row.Scan(&addr.ID, &addr.UserID, &addr.Label, &addr.StreetAddress, &addr.IsDefault, &addr.CreatedAt, &addr.UpdatedAt)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("repository.UpdateAddress: %w", err)
+	}
+
+	return &addr, nil
+}
+
+func (r *Repository) DeleteAddress(ctx context.Context, userID, addressID string) error {
+	query := `DELETE FROM addresses WHERE id = $1 AND user_id = $2`
+	cmdTag, err := r.executor.Exec(ctx, query, addressID, userID)
+	if err != nil {
+		return fmt.Errorf("repository.DeleteAddress: %w", err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return models.ErrNotFound
+	}
+	return nil
 }

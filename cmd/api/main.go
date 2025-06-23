@@ -15,10 +15,13 @@ import (
 	"dispatch-and-delivery/internal/modules/logistics"
 	"dispatch-and-delivery/internal/modules/order"
 	"dispatch-and-delivery/internal/modules/user"
+	"dispatch-and-delivery/pkg/email"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 func main() {
@@ -62,9 +65,28 @@ func main() {
 	e.Logger.Info("Successfully connected to the database!")
 
 	// 3. --- Dependency Injection (Wiring everything up) ---
+	// Initialize Google OAuth Config
+	googleOAuthConfig := &oauth2.Config{
+		RedirectURL:  cfg.GoogleOAuthRedirectURL,
+		ClientID:     cfg.GoogleOAuthClientID,
+		ClientSecret: cfg.GoogleOAuthClientSecret,
+		Scopes: []string{
+			"https://www.googleapis.com/auth/userinfo.email",
+			"https://www.googleapis.com/auth/userinfo.profile",
+		},
+		Endpoint: google.Endpoint,
+	}
+
+	emailService := email.NewSMTPService(
+		cfg.SMTPServer, // These should be in the config
+		cfg.SMTPPort,
+		cfg.SMTPUser,
+		cfg.SMTPPassword,
+		cfg.EmailFromAddress,
+	)
 	// --- Users Module ---
 	userRepo := user.NewRepository(dbPool)
-	userService := user.NewService(userRepo, cfg.JWTSecret)
+	userService := user.NewService(userRepo, emailService, cfg.JWTSecret, cfg.ClientOrigin, googleOAuthConfig)
 	userHandler := user.NewHandler(userService)
 
 	// --- Orders Module ---

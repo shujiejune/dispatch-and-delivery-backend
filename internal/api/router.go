@@ -15,14 +15,14 @@ import (
 // SetupRoutes sets up all the API endpoints for the application.
 func SetupRoutes(
 	e *echo.Echo,
+	jwtSecretKey string,
 	userHandler *user.Handler,
 	orderHandler *order.Handler,
 	logisticsHandler *logistics.Handler,
 	adminHandler *admin.Handler,
-	jwtSecret string,
 ) {
 	// Initialize the JWT authentication middleware
-	authMiddleware := middleware.JWTMAuth(jwtSecret)
+	authMiddleware := middleware.JWTMAuth(jwtSecretKey)
 	// Initialize an Admin role authorization middleware
 	adminRequired := middleware.AdminRequired()
 

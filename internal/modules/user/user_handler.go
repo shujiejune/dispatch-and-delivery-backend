@@ -18,7 +18,6 @@ type Handler struct {
 }
 
 // NewHandler creates a new user handler.
-// The AdminHandler can be this same handler, with routes protected by AdminRequired middleware.
 func NewHandler(service ServiceInterface) *Handler {
 	return &Handler{
 		service:  service,
@@ -95,9 +94,7 @@ func (h *Handler) GoogleLogin(c echo.Context) error {
 }
 
 // GoogleCallback handles the callback request from Google after the user has authenticated,
-//
-//	and validates the state parameter from the URL against the one stored in the cookie.
-//
+// and validates the state parameter from the URL against the one stored in the cookie.
 // Google redirects the user here with a `code` and `state` parameter in the URL.
 func (h *Handler) GoogleCallback(c echo.Context) error {
 	// 1. Read the state from the cookie set in the login step.
@@ -114,18 +111,18 @@ func (h *Handler) GoogleCallback(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, models.ErrorResponse{Message: "Invalid state parameter"})
 	}
 
-	// Optional: Delete the cookie after it has been used once.
+	// 3. Delete the cookie after it has been used once.
 	oauthStateCookie.Value = ""
 	oauthStateCookie.Expires = time.Unix(0, 0)
 	c.SetCookie(oauthStateCookie)
 
-	// 3. Get the authorization code from the query parameters.
+	// 4. Get the authorization code from the query parameters.
 	code := c.QueryParam("code")
 	if code == "" {
 		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: "Authorization code not provided"})
 	}
 
-	// 4. Call the service to exchange the code for a token, fetch user info,
+	// 5. Call the service to exchange the code for a token, fetch user info,
 	// find or create the user, and generate the application's JWT.
 	authResponse, err := h.service.HandleGoogleCallback(c.Request().Context(), code)
 	if err != nil {
@@ -134,7 +131,7 @@ func (h *Handler) GoogleCallback(c echo.Context) error {
 		return c.Redirect(http.StatusTemporaryRedirect, fmt.Sprintf("%s/login/error", h.service.GetClientOrigin()))
 	}
 
-	// 5. Redirect the user back to a specific frontend page with the token.
+	// 6. Redirect the user back to a specific frontend page with the token.
 	// The frontend page can then parse the token from the URL and save it.
 	redirectURL := fmt.Sprintf("%s/login/success?token=%s", h.service.GetClientOrigin(), authResponse.AccessToken)
 	return c.Redirect(http.StatusTemporaryRedirect, redirectURL)
@@ -287,4 +284,76 @@ func (h *Handler) UpdateProfile(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: "Failed to update profile"})
 	}
 	return c.JSON(http.StatusOK, user)
+}
+
+// --- User Address Routes ---
+// ListAddresses retrieves all addresses for the authenticated user.
+func (h *Handler) ListAddresses(c echo.Context) error {
+	userID := c.Get("userID").(string)
+
+	ctx := c.Request().Context()
+	addresses, err := h.service.ListAddresses(ctx, userID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, addresses)
+}
+
+// AddAddress creates a new address for the authenticated user.
+func (h *Handler) AddAddress(c echo.Context) error {
+	userID := c.Get("userID").(string)
+
+	var req models.AddAddressRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: "Invalid request body"})
+	}
+	if err := h.validate.Struct(req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: "Validation failed: " + err.Error()})
+	}
+
+	ctx := c.Request().Context()
+	newAddress, err := h.service.AddAddress(ctx, userID, req.Label, req.StreetAddress, req.IsDefault)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusCreated, newAddress)
+}
+
+// UpdateAddress modifies an existing address for the authenticated user.
+func (h *Handler) UpdateAddress(c echo.Context) error {
+	userID := c.Get("userID").(string)
+	addressID := c.Param("addressId")
+
+	var req models.UpdateAddressRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, models.ErrorResponse{Message: "Invalid request body"})
+	}
+
+	ctx := c.Request().Context()
+	// The service layer will be responsible for checking that the user owns this address
+	// before performing the update.
+	updatedAddress, err := h.service.UpdateAddress(ctx, userID, addressID, req)
+	if err != nil {
+		// The service should return a specific error for not found or forbidden
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, updatedAddress)
+}
+
+// DeleteAddress removes an address for the authenticated user.
+func (h *Handler) DeleteAddress(c echo.Context) error {
+	userID := c.Get("userID").(string)
+	addressID := c.Param("addressId")
+
+	ctx := c.Request().Context()
+	// The service layer will ensure the user can only delete their own address.
+	err := h.service.DeleteAddress(ctx, userID, addressID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, models.ErrorResponse{Message: err.Error()})
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }

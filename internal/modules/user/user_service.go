@@ -23,8 +23,8 @@ type ServiceInterface interface {
 	GetClientOrigin() string
 
 	Signup(ctx context.Context, req models.SignupRequest) (*models.User, error)
-	ActivateUserAndLogin(ctx context.Context, token string) (*models.AuthResponse, error)
 	Login(ctx context.Context, req models.LoginRequest) (*models.AuthResponse, error)
+	ActivateUserAndLogin(ctx context.Context, token string) (*models.AuthResponse, error)
 	ResendActivationEmail(ctx context.Context, email string) error
 	RequestPasswordReset(ctx context.Context, email string) error
 	ResetPassword(ctx context.Context, token string, newPassword string) (*models.AuthResponse, error)
@@ -33,6 +33,11 @@ type ServiceInterface interface {
 
 	GetUserProfile(ctx context.Context, userID string) (*models.User, error)
 	UpdateUserProfile(ctx context.Context, userID string, data models.UserUpdateData) (*models.User, error)
+
+	ListAddresses(ctx context.Context, userID string) ([]models.Address, error)
+	AddAddress(ctx context.Context, userID, label, streetAddress string, isDefault bool) (*models.Address, error)
+	UpdateAddress(ctx context.Context, userID, addressID string, req models.UpdateAddressRequest) (*models.Address, error)
+	DeleteAddress(ctx context.Context, userID, addressID string) error
 }
 
 type Service struct {
@@ -127,7 +132,7 @@ func (s *Service) generateAuthResponse(user *models.User) (*models.AuthResponse,
 		UserID: user.ID,
 		Email:  user.Email,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 30)), // 1 month expiry
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour * 24 * 30)), // 30 days expiry
 		},
 	}
 
@@ -371,4 +376,94 @@ func (s *Service) UpdateUserProfile(ctx context.Context, userID string, data mod
 		return nil, fmt.Errorf("service.UpdateUserProfile: %w", err)
 	}
 	return updatedUser, nil
+}
+
+func (s *Service) ListAddresses(ctx context.Context, userID string) ([]models.Address, error) {
+	allAddresses, err := s.userRepo.ListAddresses(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("service.ListAddresses: %w", err)
+	}
+	return allAddresses, nil
+}
+
+func (s *Service) AddAddress(ctx context.Context, userID, label, streetAddress string, isDefault bool) (*models.Address, error) {
+	// If this new address is being set as the default, unset the current default.
+	if isDefault {
+		// This entire block should be executed in a single database transaction.
+		tx, err := s.userRepo.BeginTx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// If any single operation inside the transaction fails,
+		// all previous operations within the transaction should be undone.
+		// As soon as starting the transaction, prepare to undo it,
+		// unless Commit() is called at the end.
+		defer tx.Rollback(ctx)
+
+		// Use the transaction-aware repository to perform the operations
+		txRepo := s.userRepo.WithTx(tx)
+
+		if err := txRepo.ClearDefaultAddress(ctx, userID); err != nil {
+			return nil, fmt.Errorf("failed to clear old default address: %w", err)
+		}
+
+		// Create the new address within the same transaction.
+		newAddress, err := txRepo.AddAddress(ctx, userID, label, streetAddress, isDefault)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := tx.Commit(ctx); err != nil { // Commit the transaction
+			return nil, err
+		}
+		return newAddress, nil
+	}
+
+	// If not default, add it directly
+	return s.userRepo.AddAddress(ctx, userID, label, streetAddress, isDefault)
+}
+
+func (s *Service) UpdateAddress(ctx context.Context, userID, addressID string, req models.UpdateAddressRequest) (*models.Address, error) {
+	if err := s.userRepo.VerifyAddressOwner(ctx, userID, addressID); err != nil {
+		return nil, fmt.Errorf("permission denied or address not found: %w", err)
+	}
+
+	// If the user wants to set this address as the default
+	if req.IsDefault != nil && *req.IsDefault == true {
+		tx, err := s.userRepo.BeginTx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+
+		txRepo := s.userRepo.WithTx(tx)
+		if err := txRepo.ClearDefaultAddress(ctx, userID); err != nil {
+			return nil, err
+		}
+
+		updatedAddress, err := txRepo.UpdateAddress(ctx, addressID, req)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return updatedAddress, nil
+	}
+
+	// Otherwise, just perform the update.
+	return s.userRepo.UpdateAddress(ctx, addressID, req)
+}
+
+func (s *Service) DeleteAddress(ctx context.Context, userID, addressID string) error {
+	if err := s.userRepo.VerifyAddressOwner(ctx, userID, addressID); err != nil {
+		return fmt.Errorf("permission denied or address not found: %w", err)
+	}
+
+	err := s.userRepo.DeleteAddress(ctx, userID, addressID)
+	if err != nil {
+		return fmt.Errorf("service.DeleteAddress: %w", err)
+	}
+	return nil
 }
