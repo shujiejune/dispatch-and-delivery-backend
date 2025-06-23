@@ -20,8 +20,8 @@
   - `migrations`：建表脚本，已包含 `users`、`addresses`、`machines`、`orders` 等表的创建 SQL。
   - `models`：通用结构体定义，例如 JWT Claims、错误响应、订单模型等。
   - `modules`
-    - `users`：用户模块，含 `repository`、`service`、`handler` 三层完整实现。
-    - `orders`：订单模块，也已实现 repository、service 与 handler。
+    - `users`：用户模块
+    - `orders`：订单模块
 
 ## 二、与要求的功能对比
 
