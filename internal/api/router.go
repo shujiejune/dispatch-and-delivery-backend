@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"dispatch-and-delivery/internal/api/middleware"
-	"dispatch-and-delivery/internal/modules/admin"
 	"dispatch-and-delivery/internal/modules/logistics"
 	"dispatch-and-delivery/internal/modules/order"
 	"dispatch-and-delivery/internal/modules/user"
@@ -19,12 +18,11 @@ func SetupRoutes(
 	userHandler *user.Handler,
 	orderHandler *order.Handler,
 	logisticsHandler *logistics.Handler,
-	adminHandler *admin.Handler,
 ) {
 	// Initialize the JWT authentication middleware
 	authMiddleware := middleware.JWTMAuth(jwtSecretKey)
 	// Initialize an Admin role authorization middleware
-	adminRequired := middleware.AdminRequired()
+	// adminRequired := middleware.AdminRequired()
 
 	// --- Public Routes ---
 	e.GET("/", func(c echo.Context) error {
@@ -71,7 +69,7 @@ func SetupRoutes(
 	// --- Logistics & Tracking Routes ---
 	e.GET("/ws/orders/:orderId/track", logisticsHandler.HandleTracking, authMiddleware) // Potentially WebSocket
 
-	// --- Admin Routes ---
+	/* --- Admin Routes ---
 	adminGroup := e.Group("/admin", authMiddleware, adminRequired)
 	{
 		// Order Management
@@ -85,5 +83,5 @@ func SetupRoutes(
 
 		// User Management
 		adminGroup.GET("/users", adminHandler.GetAllUsers) // View a list of all registered users
-	}
+	}*/
 }

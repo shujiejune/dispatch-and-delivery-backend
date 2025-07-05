@@ -11,7 +11,6 @@ import (
 
 	"dispatch-and-delivery/internal/api"
 	"dispatch-and-delivery/internal/config"
-	"dispatch-and-delivery/internal/modules/admin"
 	"dispatch-and-delivery/internal/modules/logistics"
 	"dispatch-and-delivery/internal/modules/order"
 	"dispatch-and-delivery/internal/modules/user"
@@ -77,16 +76,25 @@ func main() {
 		Endpoint: google.Endpoint,
 	}
 
-	emailService := email.NewSMTPService(
-		cfg.SMTPServer, // These should be in the config
-		cfg.SMTPPort,
-		cfg.SMTPUser,
-		cfg.SMTPPassword,
-		cfg.EmailFromAddress,
-	)
+	sesSender, err := email.NewSESV2Sender(context.Background(), cfg.AWSRegion, cfg.EmailFromAddress)
+	if err != nil {
+		log.Fatalf("Failed to create SES sender: %v", err)
+	}
+	templateManager, err := email.NewTemplateManager()
+	if err != nil {
+		log.Fatalf("Failed to parse email templates: %v", err)
+	}
+
 	// --- Users Module ---
 	userRepo := user.NewRepository(dbPool)
-	userService := user.NewService(userRepo, emailService, cfg.JWTSecret, cfg.ClientOrigin, googleOAuthConfig)
+	userService := user.NewService(
+		userRepo,
+		sesSender,
+		templateManager,
+		cfg.JWTSecret,
+		cfg.ClientOrigin,
+		googleOAuthConfig,
+	)
 	userHandler := user.NewHandler(userService)
 
 	// --- Orders Module ---
@@ -99,18 +107,12 @@ func main() {
 	logisticsService := logistics.NewService(logisticsRepo, orderService, cfg.JWTSecret)
 	logisticsHandler := logistics.NewHandler(logisticsService)
 
-	// --- Admin Module ---
-	adminRepo := admin.NewRepository(dbPool)
-	adminService := admin.NewService(adminRepo, orderRepo, logisticsRepo)
-	adminHandler := admin.NewHandler(adminService)
-
 	// 4. --- Initialize Router ---
 	// Add more routes
 	api.SetupRoutes(e, cfg.JWTSecret,
 		userHandler,
 		orderHandler,
 		logisticsHandler,
-		adminHandler,
 	)
 
 	// 5. --- Start Server with graceful shutdown logic ---

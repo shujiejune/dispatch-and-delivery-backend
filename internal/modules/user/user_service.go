@@ -3,7 +3,7 @@ package user
 import (
 	"context"
 	"dispatch-and-delivery/internal/models"
-	"dispatch-and-delivery/pkg/email"
+	emailSvc "dispatch-and-delivery/pkg/email"
 	"dispatch-and-delivery/pkg/utils"
 	"encoding/json"
 	"errors"
@@ -42,7 +42,8 @@ type ServiceInterface interface {
 
 type Service struct {
 	userRepo          RepositoryInterface
-	emailSvc          email.ServiceInterface // For sending emails
+	emailer           emailSvc.ServiceInterface // For sending emails
+	templateManager   *emailSvc.TemplateManager
 	jwtSecret         string
 	clientOrigin      string // For sending activation and password reset emails (domain name)
 	googleOAuthConfig *oauth2.Config
@@ -50,14 +51,16 @@ type Service struct {
 
 func NewService(
 	userRepo RepositoryInterface,
-	emailSvc email.ServiceInterface,
+	emailer emailSvc.ServiceInterface,
+	tm *emailSvc.TemplateManager,
 	JWTSecretFromConfig string,
 	clientOriginFromConfig string,
 	googleOAuthConfig *oauth2.Config,
 ) ServiceInterface {
 	return &Service{
 		userRepo:          userRepo,
-		emailSvc:          emailSvc,
+		emailer:           emailer,
+		templateManager:   tm,
 		jwtSecret:         JWTSecretFromConfig,
 		clientOrigin:      clientOriginFromConfig,
 		googleOAuthConfig: googleOAuthConfig,
@@ -114,13 +117,28 @@ func (s *Service) Signup(ctx context.Context, req models.SignupRequest) (*models
 	}
 
 	// 5. Send activation email
-	activationURL := fmt.Sprintf("%s/activate?token=%s", s.clientOrigin, activationToken, expiresAt)
-	emailSubject := "Welcome! Please Activate Your Account"
-	emailBody := fmt.Sprintf("Thank you for registering! Please click the following link in 30 minutes to activate your account: %s", activationURL)
-	err = s.emailSvc.SendEmail(ctx, []string{createdUser.Email}, emailSubject, "", emailBody)
+	activationURL := fmt.Sprintf("%s/activate?token=%s", s.clientOrigin, activationToken)
+
+	htmlContent, err := s.templateManager.GenerateActivateAccountEmailHTML(emailSvc.TemplateData{
+		Name: createdUser.Nickname,
+		Link: activationURL,
+	})
 	if err != nil {
-		log.Printf("ERROR: Failed to send activation email to %s: %v", createdUser.Email, err)
+		// Log the error but don't fail the whole signup process
+		log.Printf("Failed to generate activation email HTML: %v", err)
+		return createdUser, nil
 	}
+
+	emailSubject := "Welcome! Please Activate Your Account"
+	plainTextContent := fmt.Sprintf("Thank you for signing up! Please click the following link in 30 minutes to activate your account: %s", activationURL)
+
+	go func() {
+		// Run in a goroutine so it doesn't block the user's signup response
+		err := s.emailer.SendEmail(context.Background(), createdUser.Email, emailSubject, plainTextContent, htmlContent)
+		if err != nil {
+			log.Printf("Failed to send activation email to %s: %v", createdUser.Email, err)
+		}
+	}()
 
 	return createdUser, nil
 }
@@ -215,13 +233,27 @@ func (s *Service) ResendActivationEmail(ctx context.Context, email string) error
 
 	// 5. Send the new activation email
 	activationURL := fmt.Sprintf("%s/activate?token=%s", s.clientOrigin, activationToken)
-	emailSubject := "Activate Your Account (New Link)"
-	emailBody := fmt.Sprintf("Please click the following link in 30 minutes to activate your account: %s", activationURL)
-	if err := s.emailSvc.SendEmail(ctx, []string{user.Email}, emailSubject, "", emailBody); err != nil {
-		// Log the error but don't return it to the handler, as the token was already updated.
-		// This is a situation where background retries would be ideal.
-		log.Printf("ERROR: Failed to send re-activation email to %s: %v", user.Email, err)
+
+	htmlContent, err := s.templateManager.GenerateActivateAccountEmailHTML(emailSvc.TemplateData{
+		Name: user.Nickname,
+		Link: activationURL,
+	})
+	if err != nil {
+		// Log the error but don't fail the whole signup process
+		log.Printf("Failed to generate re-activation email HTML: %v", err)
+		return nil
 	}
+
+	emailSubject := "Activate Your Account (New Link)"
+	plainTextContent := fmt.Sprintf("Please click the following link in 30 minutes to activate your account: %s", activationURL)
+
+	go func() {
+		// Run in a goroutine so it doesn't block the user's signup response
+		err := s.emailer.SendEmail(context.Background(), email, emailSubject, plainTextContent, htmlContent)
+		if err != nil {
+			log.Printf("Failed to send re-activation email to %s: %v", email, err)
+		}
+	}()
 
 	return nil
 }
@@ -249,12 +281,27 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) error 
 
 	// 4. Send password reset email
 	resetURL := fmt.Sprintf("%s/reset-password?token=%s", s.clientOrigin, token)
-	emailSubject := "Reset Your Password"
-	emailBody := fmt.Sprintf("Please click the following link in 15 minutes to reset your password: %s", resetURL)
-	err = s.emailSvc.SendEmail(ctx, []string{user.Email}, emailSubject, "", emailBody)
+
+	htmlContent, err := s.templateManager.GenerateResetPasswordEmailHTML(emailSvc.TemplateData{
+		Name: user.Nickname,
+		Link: resetURL,
+	})
 	if err != nil {
-		return err
+		// Log the error but don't fail the whole signup process
+		log.Printf("Failed to generate re-activation email HTML: %v", err)
+		return nil
 	}
+
+	emailSubject := "Reset Your Password"
+	plainTextContent := fmt.Sprintf("Please click the following link in 15 minutes to reset your password: %s", resetURL)
+
+	go func() {
+		// Run in a goroutine so it doesn't block the user's signup response
+		err := s.emailer.SendEmail(context.Background(), email, emailSubject, plainTextContent, htmlContent)
+		if err != nil {
+			log.Printf("Failed to send password resetting email to %s: %v", email, err)
+		}
+	}()
 
 	return nil
 }

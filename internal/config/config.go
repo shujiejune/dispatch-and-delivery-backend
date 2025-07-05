@@ -13,12 +13,10 @@ type Config struct {
 	GoogleOAuthClientID     string `mapstructure:"GOOGLE_OAUTH_CLIENT_ID"`
 	GoogleOAuthClientSecret string `mapstructure:"GOOGLE_OAUTH_CLIENT_SECRET"`
 	GoogleOAuthRedirectURL  string `mapstructure:"GOOGLE_OAUTH_REDIRECT_URL"`
-	// SMTP fields for sending emails
-	SMTPServer       string
-	SMTPPort         string
-	SMTPUser         string
-	SMTPPassword     string
-	EmailFromAddress string
+	AWSRegion               string `mapstructure:"AWS_REGION"`
+	AWSAccessKeyID          string `mapstructure:"AWS_ACCESS_KEY_ID"`
+	AWSSecretAccessKey      string `mapstructure:"AWS_SECRET_ACCESS_KEY"`
+	EmailFromAddress        string `mapstructure:"EMAIL_FROM_ADDRESS"`
 }
 
 func LoadConfig(path string) (config Config, err error) {
